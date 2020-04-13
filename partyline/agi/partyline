@@ -1,0 +1,188 @@
+#!/usr/bin/env php
+<?php
+// Bootstrap FreePBX but don't include any modules (so you won't get anything
+// from the functions.inc.php files of all the modules.)
+//
+$restrict_mods = true;
+include '/etc/freepbx.conf';
+set_time_limit(0);
+error_reporting(0);
+
+// Connect to AGI:
+//
+require_once "phpagi.php";
+$AGI = new AGI();
+$AGI->answer();
+usleep(500);
+pcntl_signal(SIGHUP, "sig_handler");
+
+sim_playback($AGI,"custom/partyline-caller");
+	$time = time() + 2;
+	$cid = $AGI->parse_callerid();
+	generateCallFile(array(
+		"time"  => $time,
+		"date" => 'unused',
+		"ext" => $cid['username'],
+		"language" => 'en',
+		"maxretries" => '0',
+		"retrytime" => '0',
+		"waittime" => '30',
+		"callerid" => "Party Line <0>",
+		"AlwaysDelete" => "Yes",
+		"Archive" => "Yes"
+	));
+exit_handler();
+$AGI->hangup();
+
+function sig_handler($signo) {
+	switch ($signo) {
+		case SIGHUP:
+	$time = time() + 2;
+	$cid = $AGI->parse_callerid();
+	generateCallFile(array(
+		"time"  => $time,
+		"date" => 'unused',
+		"ext" => $cid['username'],
+		"language" => 'en',
+		"maxretries" => '0',
+		"retrytime" => '0',
+		"waittime" => '30',
+		"callerid" => "Party Line <0>",
+		"AlwaysDelete" => "Yes",
+		"Archive" => "Yes"
+	));
+			break;
+	}
+}
+
+function exit_handler() {
+	$time = time() + 2;
+	$cid = $AGI->parse_callerid();
+	generateCallFile(array(
+		"time"  => $time,
+		"date" => 'unused',
+		"ext" => $cid['username'],
+		"language" => 'en',
+		"maxretries" => '0',
+		"retrytime" => '0',
+		"waittime" => '30',
+		"callerid" => "Party Line <0>",
+		"AlwaysDelete" => "Yes",
+		"Archive" => "Yes"
+	));
+}
+
+function generateCallFile($foo) {
+	if (empty($foo['tempdir'])) {
+		$ast_tmp_path = "/var/spool/asterisk/tmp/";
+		if(!file_exists($ast_tmp_path)) {
+						mkdir($ast_tmp_path,0777,true);
+		}
+		$foo['tempdir'] = $ast_tmp_path;
+	}
+
+	if (empty($foo['outdir'])) {
+		$foo['outdir'] = "/var/spool/asterisk/outgoing/";
+	}
+
+	$foo['ext'] = preg_replace("/[^\d@\+\#]/","",$foo['ext']);
+	if (empty($foo['filename'])) {
+		$foo['filename'] = "party.".$foo['time'].".ext.".$foo['ext'].".call";
+	}
+
+	$foo['filename'] = basename($foo['filename']);
+
+	$tempfile = $foo['tempdir'].$foo['filename'];
+	$outfile = $foo['outdir'].$foo['filename'];
+
+	// Delete any old .call file with the same name as the one we are creating.
+	if(file_exists($outfile) ) {
+		unlink($outfile);
+	}
+
+	// Create up a .call file, write and close
+	$wuc = fopen($tempfile, 'w');
+	fputs( $wuc, "channel: Local/".$foo['ext']."@originate-skipvm\n" );
+	fputs( $wuc, "maxretries: ".$foo['maxretries']."\n");
+	fputs( $wuc, "retrytime: ".$foo['retrytime']."\n");
+	fputs( $wuc, "waittime: ".$foo['waittime']."\n");
+	fputs( $wuc, "callerid: ".$foo['callerid']."\n");
+	fputs( $wuc, 'set: CHANNEL(language)='.$foo['language']."\n");
+	fputs( $wuc, "context: party-line\n");
+	fputs( $wuc, "extension: 302\n");
+	fputs( $wuc, "priority: 1\n");
+	//fputs( $wuc, "application: ".$foo['application']."\n");
+	//fputs( $wuc, "data: ".$foo['data']."\n");
+	fputs( $wuc, "AlwaysDelete: ".$foo['AlwaysDelete']."\n");
+	fputs( $wuc, "Archive: ".$foo['Archive']."\n");
+	fclose( $wuc );
+
+	// set time of temp file and move to outgoing
+	touch( $tempfile, $foo['time'], $foo['time'] );
+	rename( $tempfile, $outfile );
+	return;
+}
+/**
+ * Simulate playback functionality like the dialplan
+ * @param  object $AGI  The AGI Object
+ * @param  string $file Audio files combined by/with '&'
+ */
+function sim_playback($AGI, $file) {
+	$files = explode('&',$file);
+	foreach($files as $f) {
+		$AGI->stream_file($f);
+	}
+}
+
+/**
+ * Simulate background playback with added functionality
+ * @param  object  $AGI      The AGI Object
+ * @param  string  $file     Audio files combined by/with '&'
+ * @param  string  $digits   Allowed digits (if we are prompting for them)
+ * @param  string  $length   Length of allowed digits (if we are prompting for them)
+ * @param  string  $escape   Escape character to exit
+ * @param  integer $timeout  Timeout
+ * @param  integer $maxLoops Max timeout loops
+ * @param  integer $loops    Total loops
+ */
+function sim_background($AGI, $file,$digits='',$length='1',$escape='#',$timeout=15000, $maxLoops=1, $loops=0) {
+	$files = explode('&',$file);
+	$number = '';
+	foreach($files as $f) {
+		$ret = $AGI->stream_file($f,$digits);
+		if($ret['code'] == 200 && $ret['result'] != 0) {
+			$number .= chr($ret['result']);
+		}
+		if(strlen($number) >= $length) {
+			break;
+		}
+	}
+	if(trim($digits) != '' && strlen($number) < $length) {
+		while(strlen($number) < $length && $loops < $maxLoops) {
+			$ret = $AGI->wait_for_digit($timeout);
+			if($loops > 0) {
+				sim_playback($AGI, "please-try-again");
+			}
+			if($ret['code'] == 200 && $ret['result'] == 0) {
+				sim_playback($AGI, "you-entered&bad&digits");
+			} elseif($ret['code'] == 200) {
+				$digit = chr($ret['result']);
+				if($digit == $escape) {
+					break;
+				}
+				if(strpos($digits,$digit) !== false) {
+					$number .= $digit;
+					continue; //dont count loops as we are good
+				} else {
+					sim_playback($AGI,"you-entered&bad&digits");
+				}
+			} else {
+				sim_playback($AGI,"an-error-has-occurred");
+			}
+			$loops++;
+		}
+	}
+	$number = trim($number);
+	return $number;
+}
+
