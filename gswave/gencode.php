@@ -33,7 +33,7 @@ try {
 
      $xml =  "<?xml version='1.0' encoding='utf-8'?><AccountConfig version='1'><Account><RegisterServer>$asteriskip</RegisterServer>";
      $xml .= "<OutboundServer></OutboundServer><UserID>$ext</UserID><AuthID>$ext</AuthID><AuthPass>".$dev['secret']."</AuthPass>";
-     $xml .= "<AccountName>$ext@knot.space</AccountName><DisplayName>".$user['name']."</DisplayName><DNSMode>SRV</DNSMode>";
+     $xml .= "<AccountName>$ext@$asteriskip</AccountName><DisplayName>".$user['name']."</DisplayName><DNSMode>SRV</DNSMode>";
      $xml .= '<Dialplan>{x+|*x+|*++}</Dialplan><RandomPort>0</RandomPort><SecOutboundServer></SecOutboundServer><Voicemail>*97</Voicemail></Account></AccountConfig>';
 
     /*
